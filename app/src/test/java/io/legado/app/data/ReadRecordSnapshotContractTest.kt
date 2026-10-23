@@ -23,9 +23,12 @@ class ReadRecordSnapshotContractTest {
 
     @Test
     fun `all reading modes write current book snapshot`() {
+        val text = projectFile("src/main/java/io/legado/app/model/ReadBook.kt")
         assertTrue(
-            projectFile("src/main/java/io/legado/app/model/ReadBook.kt")
-                .contains("readRecord.updateSnapshot(currentBook, durChapterIndex, durChapterPos)")
+            text.contains("persistableReadPosition(durChapterPos)?.let { position ->")
+        )
+        assertTrue(
+            text.contains("readRecord.updateSnapshot(currentBook, durChapterIndex, position)")
         )
         assertTrue(
             projectFile("src/main/java/io/legado/app/model/ReadManga.kt")

@@ -93,6 +93,20 @@ internal fun resolveHighlightChapterPosition(
 
 // ponytail: fixed 64-character anchor; use contextual matching if sources rewrite larger spans.
 private const val REFRESH_POSITION_ANCHOR_LENGTH = 64
+private const val PENDING_PREVIOUS_CHAPTER_END_POSITION = Int.MAX_VALUE
+
+internal fun persistableReadPosition(position: Int): Int? =
+    position.takeUnless { it == PENDING_PREVIOUS_CHAPTER_END_POSITION }
+
+internal fun normalizePendingPreviousChapterEndPosition(
+    position: Int,
+    chapterCompleted: Boolean,
+    lastReadLength: Int,
+): Int = if (position == PENDING_PREVIOUS_CHAPTER_END_POSITION && chapterCompleted) {
+    lastReadLength.coerceAtLeast(0)
+} else {
+    position
+}
 
 internal fun resolveLayoutBodyPosition(source: String, position: Int, target: String): Int? {
     if (source == target) return position.coerceIn(0, target.length)
@@ -813,6 +827,7 @@ object ReadBook : CoroutineScope by MainScope() {
     }
 
     fun uploadProgress(toast: Boolean = false, successAction: (() -> Unit)? = null) {
+        if (persistableReadPosition(durChapterPos) == null) return
         book?.let {
             launch(IO) {
                 AppWebDav.uploadBookProgress(it, toast) {
@@ -834,6 +849,7 @@ object ReadBook : CoroutineScope by MainScope() {
         syncSuccessAction: (() -> Unit)? = null
     ) {
         if (!AppConfig.syncBookProgress) return
+        if (persistableReadPosition(durChapterPos) == null) return
         val book = book ?: return
         Coroutine.async {
             AppWebDav.getBookProgress(book)
@@ -880,7 +896,9 @@ object ReadBook : CoroutineScope by MainScope() {
             readRecord.readTime += elapsed
             readStartTime = now
             readRecord.lastRead = now
-            readRecord.updateSnapshot(currentBook, durChapterIndex, durChapterPos)
+            persistableReadPosition(durChapterPos)?.let { position ->
+                readRecord.updateSnapshot(currentBook, durChapterIndex, position)
+            }
             Triple(readRecord.copy(), currentBook, elapsed)
         }
         executor.execute {
@@ -1040,7 +1058,14 @@ object ReadBook : CoroutineScope by MainScope() {
         }
         if (durChapterIndex > 0) {
             val restartReadAloud = prepareReadAloudPageNavigation(syncReadAloudFollow)
-            durChapterPos = if (toLast) prevTextChapter?.lastReadLength ?: Int.MAX_VALUE else 0
+            val previousLastReadLength = prevTextChapter
+                ?.takeIf { it.isCompleted }
+                ?.lastReadLength
+            durChapterPos = if (toLast) {
+                previousLastReadLength ?: PENDING_PREVIOUS_CHAPTER_END_POSITION
+            } else {
+                0
+            }
             durChapterIndex--
             clearExpiredChapterLoadingJob()
             nextTextChapter?.invalidateHighlightRuleMatches()
@@ -1592,6 +1617,7 @@ object ReadBook : CoroutineScope by MainScope() {
                     ensureContentCurrent(book, contentToken)
                     finishPendingPdfJump(book, textChapter)
                     val restoredAnchor = resolvePendingHighlightAnchor(book, textChapter)
+                    if (normalizePendingPreviousChapterEnd(textChapter)) saveRead()
                     if (upContent) {
                         callBack?.upContent(
                             offset,
@@ -1615,6 +1641,7 @@ object ReadBook : CoroutineScope by MainScope() {
                         observeHighlightRuleLayout(textChapter)
                     }
                     textChapter.layoutChannel.receiveAsFlow().collect { ensureContentCurrent(book, contentToken) }
+                    if (normalizePendingPreviousChapterEnd(textChapter)) saveRead()
                     if (upContent) {
                         callBack?.upContent(
                             offset,
@@ -1645,6 +1672,7 @@ object ReadBook : CoroutineScope by MainScope() {
                             )
                         }
                     }
+                    if (normalizePendingPreviousChapterEnd(textChapter)) saveRead()
                 }
             }
 
@@ -1722,6 +1750,7 @@ object ReadBook : CoroutineScope by MainScope() {
                     ensureContentCurrent(book, contentToken)
                     finishPendingPdfJump(book, textChapter)
                     val restoredAnchor = resolvePendingHighlightAnchor(book, textChapter)
+                    if (normalizePendingPreviousChapterEnd(textChapter)) saveRead()
                     if (upContent) {
                         callBack?.upContent(
                             offset,
@@ -1744,6 +1773,7 @@ object ReadBook : CoroutineScope by MainScope() {
                         observeHighlightRuleLayout(textChapter)
                     }
                     textChapter.layoutChannel.receiveAsFlow().collect { ensureContentCurrent(book, contentToken) }
+                    if (normalizePendingPreviousChapterEnd(textChapter)) saveRead()
                     if (upContent) {
                         callBack?.upContent(
                             offset,
@@ -1773,6 +1803,7 @@ object ReadBook : CoroutineScope by MainScope() {
                             )
                         }
                     }
+                    if (normalizePendingPreviousChapterEnd(textChapter)) saveRead()
                 }
             }
         }.onFailure {
@@ -1819,6 +1850,21 @@ object ReadBook : CoroutineScope by MainScope() {
         }
     }
 
+    private suspend fun normalizePendingPreviousChapterEnd(textChapter: TextChapter): Boolean =
+        withContext(Main) {
+            if (curTextChapter !== textChapter || textChapter.chapter.index != durChapterIndex) {
+                return@withContext false
+            }
+            val normalized = normalizePendingPreviousChapterEndPosition(
+                durChapterPos,
+                textChapter.isCompleted,
+                textChapter.lastReadLength,
+            )
+            if (normalized == durChapterPos) return@withContext false
+            durChapterPos = normalized
+            true
+        }
+
     fun pageAnim(): Int {
         return book?.getPageAnim() ?: ReadBookConfig.pageAnim
     }
@@ -1837,24 +1883,26 @@ object ReadBook : CoroutineScope by MainScope() {
         val book = book ?: return
         // The shared writer may still be queued when the reader switches books or pages.
         val durChapterIndex = durChapterIndex
-        val durChapterPos = durChapterPos
+        val persistableDurChapterPos = persistableReadPosition(durChapterPos)
         val bookSource = bookSource
         val durTime = System.currentTimeMillis()
         executor.execute {
             kotlin.runCatching {
                 book.lastCheckCount = 0
-                book.durChapterTime = durTime
-                val chapterChanged = book.durChapterIndex != durChapterIndex
-                book.durChapterIndex = durChapterIndex
-                book.durChapterPos = durChapterPos
-                if (!pageChanged || chapterChanged) {
-                    appDb.bookChapterDao.getChapter(book.bookUrl, durChapterIndex)?.let {
-                        book.durChapterTitle = it.getDisplayTitle(
-                            ContentProcessor.get(book.name, book.origin).getTitleReplaceRules(),
-                            book.getUseReplaceRule(),
-                            replaceBook = book.toReplaceBook()
-                        )
-                        SourceCallBack.callBackBook(SourceCallBack.SAVE_READ, bookSource, book, it, durTime.toString())
+                if (persistableDurChapterPos != null) {
+                    book.durChapterTime = durTime
+                    val chapterChanged = book.durChapterIndex != durChapterIndex
+                    book.durChapterIndex = durChapterIndex
+                    book.durChapterPos = persistableDurChapterPos
+                    if (!pageChanged || chapterChanged) {
+                        appDb.bookChapterDao.getChapter(book.bookUrl, durChapterIndex)?.let {
+                            book.durChapterTitle = it.getDisplayTitle(
+                                ContentProcessor.get(book.name, book.origin).getTitleReplaceRules(),
+                                book.getUseReplaceRule(),
+                                replaceBook = book.toReplaceBook()
+                            )
+                            SourceCallBack.callBackBook(SourceCallBack.SAVE_READ, bookSource, book, it, durTime.toString())
+                        }
                     }
                 }
                 book.update()
