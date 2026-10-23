@@ -67,7 +67,8 @@ class ReaderIdentityTest {
         assertTrue(releaseWorkflow.contains("-PreaderReleaseA=true"))
         assertTrue(releaseWorkflow.contains("--latest"))
         assertTrue(testReleaseWorkflow.contains("needs.credentials.outputs.available == 'true'"))
-        assertTrue(testReleaseWorkflow.contains("<!-- reader-version-code:%s -->"))
+        assertTrue(testReleaseWorkflow.contains("prepare-reader-release-notes.sh"))
+        assertTrue(testReleaseWorkflow.contains("readerReleaseNotes.md"))
     }
 
 }

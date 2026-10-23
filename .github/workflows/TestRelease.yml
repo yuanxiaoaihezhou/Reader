@@ -16,6 +16,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   prepare:
@@ -49,6 +50,40 @@ jobs:
             echo "$key=$value" >> "$GITHUB_OUTPUT"
           done < <(bash .github/scripts/reader-version.sh)
 
+  changelog:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      VERSION_CODE: ${{ needs.prepare.outputs.versionCode }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      CHANNEL: ${{ needs.prepare.outputs.channel }}
+      COMMIT_SHA: ${{ needs.prepare.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.commit }}
+      - name: Prepare Reader changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/prepare-reader-release-notes.sh \
+            "$VERSION" "$VERSION_CODE" "$TAG" "$COMMIT_SHA" "$CHANNEL" release-notes
+      - uses: actions/upload-artifact@v7
+        with:
+          name: reader-release-notes
+          if-no-files-found: error
+          path: |
+            release-notes/release-notes.md
+            release-notes/readerReleaseNotes.md
+            release-notes/readerChangelog.md
+            release-notes/changelog.md
+            release-notes/source.json
+
   credentials:
     needs: prepare
     if: needs.prepare.outputs.channel == 'beta'
@@ -72,7 +107,7 @@ jobs:
           fi
 
   build:
-    needs: [prepare, credentials]
+    needs: [prepare, credentials, changelog]
     if: needs.prepare.outputs.channel == 'beta' && needs.credentials.outputs.available == 'true'
     strategy:
       fail-fast: false
@@ -92,6 +127,14 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v6.4.0
+      - uses: actions/download-artifact@v8
+        with:
+          name: reader-release-notes
+          path: release-notes
+      - name: Install Reader release notes
+        run: |
+          cp release-notes/readerReleaseNotes.md app/src/main/assets/readerReleaseNotes.md
+          cp release-notes/readerChangelog.md app/src/main/assets/readerChangelog.md
       - name: Prepare signing
         env:
           RELEASE_KEY_STORE: ${{ secrets.RELEASE_KEY_STORE }}
@@ -132,7 +175,7 @@ jobs:
           path: out/*.apk
 
   publish:
-    needs: [prepare, build]
+    needs: [prepare, build, changelog]
     if: needs.prepare.outputs.channel == 'beta'
     runs-on: ubuntu-latest
     permissions:
@@ -154,13 +197,7 @@ jobs:
         run: |
           mkdir -p apk
           find artifacts -type f -name '*.apk' -exec cp {} apk/ \;
-          built=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          {
-            printf '<!-- reader-version-code:%s -->\n' "$VERSION_CODE"
-            printf 'Reader %s\n\n' "$VERSION"
-            printf 'Build: %s  \nCommit: `%s`  \nBuilt: %s\n\n' "$VERSION_CODE" "${COMMIT_SHA:0:7}" "$built"
-            printf '此版本为自动测试版，升级前请备份数据。\n'
-          } > release-notes.md
+          cp artifacts/reader-release-notes/release-notes.md release-notes.md
       - name: Publish immutable beta release
         env:
           GH_TOKEN: ${{ github.token }}
