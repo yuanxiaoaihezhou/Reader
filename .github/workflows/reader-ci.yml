@@ -17,6 +17,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate-reader-changelog:
+    name: validate-reader-changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Test Reader changelog tooling
+        run: python3 .github/scripts/test-reader-changelog.py
+
+      - name: Validate PR changelog
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+        run: |
+          jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > /tmp/reader-pr-body.md
+          python3 .github/scripts/reader-changelog.py validate --body-file /tmp/reader-pr-body.md
+
   build-debug-apk:
     name: build-debug-apk
     runs-on: ubuntu-latest

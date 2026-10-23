@@ -13,6 +13,7 @@ import io.legado.app.constant.AppLog
 import io.legado.app.help.CrashHandler
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.coroutine.Coroutine
+import io.legado.app.help.update.ReaderChangelog
 import io.legado.app.ui.widget.dialog.TextDialog
 import io.legado.app.utils.FileDoc
 import io.legado.app.utils.compress.ZipUtils
@@ -51,7 +52,7 @@ class AboutFragment : PreferenceFragmentCompat() {
             "reader_source" -> openUrl(R.string.reader_source_url)
             "upstream_project" -> openUrl(R.string.upstream_source_url)
             "contributors" -> openUrl(R.string.contributors_url)
-            "update_log" -> showMdFile(getString(R.string.update_log), "updateLog.md")
+            "update_log" -> showUpdateLog()
             "check_update" -> checkAppUpdate()
             "check_beta_update" -> checkAppUpdate(beta = true)
             "mail" -> requireContext().sendMail(getString(R.string.email))
@@ -69,6 +70,11 @@ class AboutFragment : PreferenceFragmentCompat() {
     @Suppress("SameParameterValue")
     private fun openUrl(@StringRes addressID: Int) {
         requireContext().openUrl(getString(addressID))
+    }
+
+    private fun showUpdateLog() {
+        val mdText = ReaderChangelog.readFullChangelog(requireContext().assets)
+        showDialogFragment(TextDialog(getString(R.string.update_log), mdText, TextDialog.Mode.MD))
     }
 
     /**

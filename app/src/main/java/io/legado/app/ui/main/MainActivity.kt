@@ -39,6 +39,7 @@ import io.legado.app.help.config.LocalConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.storage.Backup
 import io.legado.app.help.update.AppUpdate
+import io.legado.app.help.update.ReaderChangelog
 import io.legado.app.help.update.isIgnoredAppUpdate
 import io.legado.app.lib.dialogs.alert
 import io.legado.app.lib.theme.primaryColor
@@ -337,7 +338,7 @@ class MainActivity : VMBaseActivity<ActivityMainBinding, MainViewModel>(),
             }
             showDialogFragment(dialog)
         } else if (!BuildConfig.DEBUG) {
-            val log = String(assets.open("updateLog.md").readBytes())
+            val log = ReaderChangelog.readReleaseNotes(assets)
             val dialog = TextDialog(getString(R.string.update_log), log, TextDialog.Mode.MD)
             dialog.setOnDismissListener {
                 block.resume(null)

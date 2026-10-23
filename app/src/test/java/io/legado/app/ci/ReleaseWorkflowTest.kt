@@ -13,7 +13,9 @@ class ReleaseWorkflowTest {
         assertTrue(workflow.contains("channel=stable"))
         assertTrue(workflow.contains("reader-version.sh"))
         assertTrue(workflow.contains("--latest"))
-        assertTrue(workflow.contains("reader-version-code:"))
+        assertTrue(workflow.contains("prepare-reader-release-notes.sh"))
+        assertTrue(workflow.contains("readerReleaseNotes.md"))
+        assertTrue(workflow.contains("readerChangelog.md"))
     }
 
     private fun repoFile(path: String): File {
