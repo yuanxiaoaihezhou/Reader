@@ -12,6 +12,7 @@ import io.legado.app.constant.SourceType
 import io.legado.app.data.appDb
 import io.legado.app.exception.NoStackTraceException
 import io.legado.app.help.http.newCallResponseBody
+import io.legado.app.help.http.CloudflareChallenge
 import io.legado.app.help.http.okHttpClient
 import io.legado.app.help.source.SourceHelp
 import io.legado.app.help.source.SourceVerificationHelp
@@ -114,9 +115,43 @@ class WebViewModel(application: Application) : BaseViewModel(application) {
         }
     }
 
-    fun saveVerificationResult(webView: WebView, success: () -> Unit) {
+    fun saveVerificationResult(
+        webView: WebView,
+        success: () -> Unit,
+        onVerificationIncomplete: () -> Unit = {},
+    ) {
         if (!sourceVerificationEnable) {
             return success.invoke()
+        }
+        if (intent?.getBooleanExtra("cloudflareVerification", false) == true) {
+            // Never close a Cloudflare verification page merely because the
+            // legacy JS marker disappeared. Check the real HTTP response.
+            execute {
+                val originalUrl = intent?.getStringExtra("url") ?: return@execute false
+                val response = AnalyzeUrl(
+                    originalUrl,
+                    headerMapF = headerMap,
+                    source = source,
+                    coroutineContext = coroutineContext,
+                ).getStrResponseAwait(useWebView = false)
+                if (CloudflareChallenge.isChallenge(response.raw) ||
+                    response.raw.code !in 200..399
+                ) {
+                    return@execute false
+                }
+                SourceVerificationHelp.setResult(
+                    verificationResultKey,
+                    response.body?.takeIf { it.isNotEmpty() } ?: "cloudflare_verified",
+                    response.url,
+                )
+                true
+            }.onSuccess { verified ->
+                if (verified) success.invoke() else onVerificationIncomplete.invoke()
+            }.onError {
+                it.printOnDebug()
+                onVerificationIncomplete.invoke()
+            }
+            return
         }
         if (refetchAfterSuccess) {
             execute {

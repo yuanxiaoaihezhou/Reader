@@ -59,7 +59,8 @@ object CookieManager {
         val cookie = CookieStore.getCookie(domain)
         val requestCookie = request.header("Cookie")
 
-        val newCookie = mergeCookies(requestCookie, cookie) ?: return request
+        // An explicitly specified request Cookie must override persisted cookies.
+        val newCookie = mergeCookies(cookie, requestCookie) ?: return request
 
         kotlin.runCatching {
             return request.newBuilder()
@@ -144,7 +145,7 @@ object CookieManager {
         val baseUrl = NetworkUtils.getBaseUrl(url) ?: return
         val cookies = CookieStore.getCookie(url).splitNotBlank(";")
         val cookieManager = CookieManager.getInstance()
-        cookieManager.removeSessionCookies(null)
+        // Do not wipe session cookies belonging to other sources/WebViews.
         cookies.forEach {
             cookieManager.setCookie(baseUrl, it)
         }

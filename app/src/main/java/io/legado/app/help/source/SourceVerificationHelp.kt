@@ -207,6 +207,7 @@ object SourceVerificationHelp {
         refetchAfterSuccess: Boolean = true,
         html: String? = null,
         coroutineContext: CoroutineContext? = null,
+        cloudflareVerification: Boolean = false,
     ): VerificationResult {
         source
             ?: throw NoStackTraceException("getVerificationResult parameter source cannot be null")
@@ -230,6 +231,7 @@ object SourceVerificationHelp {
                         refetchAfterSuccess,
                         html,
                         coroutineContext,
+                        cloudflareVerification,
                     )
                 )
             } finally {
@@ -262,6 +264,7 @@ object SourceVerificationHelp {
                         refetchAfterSuccess,
                         html,
                         coroutineContext,
+                        cloudflareVerification,
                     )
                     verificationFlights.complete(lease)
                     VerificationResult.Response(result)
@@ -289,6 +292,7 @@ object SourceVerificationHelp {
         refetchAfterSuccess: Boolean,
         html: String?,
         coroutineContext: CoroutineContext?,
+        cloudflareVerification: Boolean,
     ): Pair<String, String> {
         val sourceKey = source.getKey()
         val verificationResultKey = registerVerificationAttempt(Thread.currentThread())
@@ -310,6 +314,7 @@ object SourceVerificationHelp {
                     refetchAfterSuccess,
                     html,
                     verificationResultKey,
+                    cloudflareVerification,
                 )
             }
 
@@ -353,6 +358,7 @@ object SourceVerificationHelp {
         refetchAfterSuccess: Boolean? = true,
         html: String? = null,
         verificationResultKey: String? = null,
+        cloudflareVerification: Boolean = false,
     ) {
         source ?: throw NoStackTraceException("startBrowser parameter source cannot be null")
         require(url.length < 64 * 1024) { "startBrowser parameter url too long" }
@@ -369,6 +375,7 @@ object SourceVerificationHelp {
             putExtra("refetchAfterSuccess", refetchAfterSuccess)
             putExtra("html", html)
             putExtra("verificationResultKey", verificationResultKey)
+            putExtra("cloudflareVerification", cloudflareVerification)
         }
     }
 

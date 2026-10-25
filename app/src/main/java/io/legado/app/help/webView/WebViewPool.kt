@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.CookieManager
 import io.legado.app.help.config.AppConfig
 import io.legado.app.ui.rss.read.VisibleWebView
 import io.legado.app.utils.setDarkeningAllowed
@@ -57,6 +58,9 @@ object WebViewPool {
             createNewWebView() // 创建新实例
         }
         pooledWebView.upContext(context).apply {
+            // A background WebView must never inherit an interactive verification
+            // session's relaxed third-party-cookie policy.
+            CookieManager.getInstance().setAcceptThirdPartyCookies(realWebView, false)
             realWebView.settings.apply {
                 setDarkeningAllowed(AppConfig.isNightTheme) //设置是否夜间
                 userAgentString = AppConfig.userAgent
@@ -75,6 +79,7 @@ object WebViewPool {
         val recycleUrl = "$BLANK_HTML?legado-recycle=$recycleGeneration"
         // 重置WebView状态
         pooledWebView.realWebView.run {
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
             (parent as? ViewGroup)?.removeView(this)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,

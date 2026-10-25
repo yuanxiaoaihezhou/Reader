@@ -43,7 +43,7 @@ object CookieStore : CookieManagerInterface {
             val baseUrl = NetworkUtils.getBaseUrl(url) ?: return
             val cookies = cookie.splitNotBlank(";")
             val cookieManager = android.webkit.CookieManager.getInstance()
-            cookieManager.removeSessionCookies(null)
+            // Removing session cookies here clears *all* WebView sites, not only this URL.
             cookies.forEach {
                 cookieManager.setCookie(baseUrl, it)
             }
@@ -88,16 +88,9 @@ object CookieStore : CookieManagerInterface {
         val cookie = getCookieNoSession(url)
         val sessionCookie = CookieManager.getSessionCookie(domain)
 
-        val cookieMap = mergeCookiesToMap(cookie, sessionCookie)
-
-        var ck = mapToCookie(cookieMap) ?: ""
-        while (ck.length > 4096) {
-            val removeKey = cookieMap.keys.random()
-            CookieManager.removeCookie(url, removeKey)
-            cookieMap.remove(removeKey)
-            ck = mapToCookie(cookieMap) ?: ""
-        }
-        return ck
+        // 4096 bytes is a per-cookie interoperability baseline, not the limit for
+        // the combined Cookie request header. Never randomly discard login or cf_clearance.
+        return mapToCookie(mergeCookiesToMap(cookie, sessionCookie)) ?: ""
     }
 
     fun getKey(url: String, key: String): String {

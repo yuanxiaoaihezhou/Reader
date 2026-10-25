@@ -27,6 +27,10 @@ import io.legado.app.help.http.BackstageWebView
 import io.legado.app.help.http.CookieManager
 import io.legado.app.help.http.CookieManager.mergeCookies
 import io.legado.app.help.http.CookieStore
+import io.legado.app.help.http.CloudflareChallenge
+import io.legado.app.help.source.SourceVerificationHelp
+import io.legado.app.help.source.SuppressSourceNavigation
+import io.legado.app.utils.isMainThread
 import io.legado.app.help.http.Cronet
 import io.legado.app.help.http.RequestMethod
 import io.legado.app.help.http.StrResponse
@@ -148,6 +152,9 @@ class AnalyzeUrl(
     private var bodyJs: String? = null
     private var dnsIp: String? = null
     private val enabledCookieJar = source?.enabledCookieJar == true
+    // Preserve source/urlOption Cookie priority across a retry after WebView verification.
+    // Do not merge a previous request's computed Cookie back over fresh cf_clearance.
+    private var explicitCookie: String? = null
     private val domain: String
     private var webViewDelayTime: Long = 0
     private val concurrentRateLimiter = ConcurrentRateLimiter(source)
@@ -170,6 +177,7 @@ class AnalyzeUrl(
             }
         }
         initUrl()
+        explicitCookie = headerMap["Cookie"]
         val sourceKey = source?.getKey()
         domain = sourceKey?.takeIf { NetworkUtils.getBaseUrl(it) == null }
             ?: NetworkUtils.getSubDomain(url)
@@ -567,7 +575,10 @@ class AnalyzeUrl(
                     ).getStrResponse()
                 }
             } else {
-                strResponse = getClient().newCallStrResponse(requestRetryCount()) {
+                val client = getClient()
+                // The same request builder is used for the single post-verification retry.
+                // Each call receives newly merged Cookies from setCookie().
+                suspend fun sendRequest(): StrResponse = client.newCallStrResponse(requestRetryCount()) {
                     addHeaders(headerMap)
                     when (method) {
                         RequestMethod.POST -> {
@@ -592,7 +603,36 @@ class AnalyzeUrl(
                         else -> get(urlNoQuery, encodedQuery)
                     }
                     applyCronetRequestConfig()
-                }.let {
+                }
+                var httpResponse = sendRequest()
+                if (CloudflareChallenge.shouldOfferVerification(
+                        challenge = CloudflareChallenge.isChallenge(httpResponse.raw),
+                        method = method,
+                        hasSource = source != null,
+                        isBookRequest = ruleData is Book,
+                        usesWebView = this.useWebView,
+                        isTest = isTest,
+                        isDownload = isDownloadRequest,
+                        hasSourceProxy = !proxy.isNullOrBlank(),
+                        isBulkOperation = coroutineContext[SuppressSourceNavigation] != null,
+                        isMainThread = isMainThread,
+                    )
+                ) {
+                    // Reuses SourceVerificationHelp's same-source/host single-flight.
+                    // The verification WebView and subsequent network fetch use the same UA.
+                    SourceVerificationHelp.getVerificationResult(
+                        source = requireNotNull(source),
+                        url = httpResponse.raw.request.url.toString(),
+                        title = "Cloudflare 验证",
+                        useBrowser = true,
+                        refetchAfterSuccess = true,
+                        coroutineContext = coroutineContext,
+                        cloudflareVerification = true,
+                    )
+                    setCookie()  // Never reuse the stale pre-verification Cookie header.
+                    httpResponse = sendRequest() // Exactly one retry; never reopen WebView.
+                }
+                strResponse = httpResponse.let {
                     val isXml = it.raw.body.contentType()?.toString()
                         ?.matches(AppPattern.xmlContentTypeRegex) == true
                     if (isXml && it.body?.trim()?.startsWith("<?xml", true) == false) {
@@ -839,10 +879,13 @@ class AnalyzeUrl(
             */
             CookieStore.getCookie(domain)
         }
-        if (cookie.isNotEmpty()) {
-            mergeCookies(cookie, headerMap["Cookie"])?.let {
-                headerMap.put("Cookie", it)
-            }
+        // Rebuild on *every* attempt; headerMap["Cookie"] may hold obsolete values
+        // from the preceding HTTP request. Only a user's explicit Cookie is retained.
+        val merged = mergeCookies(cookie, explicitCookie)
+        if (merged.isNullOrEmpty()) {
+            headerMap.remove("Cookie")
+        } else {
+            headerMap["Cookie"] = merged
         }
         if (enabledCookieJar) {
             headerMap[CookieManager.cookieJarHeader] = "1"
