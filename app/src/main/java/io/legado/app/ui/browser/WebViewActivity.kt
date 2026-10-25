@@ -214,9 +214,9 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
             R.id.menu_copy_url -> sendToClip(viewModel.baseUrl)
             R.id.menu_ok -> {
                 if (viewModel.sourceVerificationEnable) {
-                    viewModel.saveVerificationResult(currentWebView) {
+                    viewModel.saveVerificationResult(currentWebView, success = {
                         finish()
-                    }
+                    })
                 } else {
                     finish()
                 }
@@ -345,9 +345,9 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
     private fun close() {
         if (!isCloudflareChallenge) {
             if (viewModel.sourceVerificationEnable) {
-                viewModel.saveVerificationResult(currentWebView) {
+                viewModel.saveVerificationResult(currentWebView, success = {
                     finish()
-                }
+                })
             }
             else {
                 finish()
