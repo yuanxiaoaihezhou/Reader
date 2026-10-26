@@ -95,6 +95,7 @@ class WebViewLoginFragment : BaseFragment(R.layout.fragment_web_view_login) {
             userAgentString = requestConfig.userAgent
         }
         val cookieManager = CookieManager.getInstance()
+        cookieManager.setAcceptThirdPartyCookies(webView, true)
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 val cookie = cookieManager.getCookie(url)

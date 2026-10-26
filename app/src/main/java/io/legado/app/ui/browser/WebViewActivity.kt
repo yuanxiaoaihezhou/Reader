@@ -85,6 +85,7 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
     private var customWebViewCallback: WebChromeClient.CustomViewCallback? = null
     private var webPic: String? = null
     private var isCloudflareChallenge = false
+    private var isCheckingCloudflareVerification = false
     private var isFullScreen = false
     private var isWebFullscreen = false
     private var orientationBeforeWebFullscreen: Int? = null
@@ -110,6 +111,7 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
         }
         pooledWebView = WebViewPool.acquire(this)
         currentWebView = pooledWebView.realWebView
+        isCloudflareChallenge = intent.getBooleanExtra("cloudflareVerification", false)
         binding.webViewContainer.addView(currentWebView)
         if (!SourceVerificationHelp.attachVerificationUi(
                 intent.getStringExtra("verificationResultKey"),
@@ -212,9 +214,9 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
             R.id.menu_copy_url -> sendToClip(viewModel.baseUrl)
             R.id.menu_ok -> {
                 if (viewModel.sourceVerificationEnable) {
-                    viewModel.saveVerificationResult(currentWebView) {
+                    viewModel.saveVerificationResult(currentWebView, success = {
                         finish()
-                    }
+                    })
                 } else {
                     finish()
                 }
@@ -269,6 +271,8 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
             loadWithOverviewMode = true
             userAgentString = userAgent
         }
+        // Interactive verification can embed challenges.cloudflare.com.
+        CookieManager.getInstance().setAcceptThirdPartyCookies(currentWebView, true)
         AppCookieManager.applyToWebView(url)
         currentWebView.setOnLongClickListener {
             val hitTestResult = currentWebView.hitTestResult
@@ -341,9 +345,9 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
     private fun close() {
         if (!isCloudflareChallenge) {
             if (viewModel.sourceVerificationEnable) {
-                viewModel.saveVerificationResult(currentWebView) {
+                viewModel.saveVerificationResult(currentWebView, success = {
                     finish()
-                }
+                })
             }
             else {
                 finish()
@@ -536,14 +540,22 @@ class WebViewActivity : VMBaseActivity<ActivityWebViewBinding, WebViewModel>() {
                 } else {
                     binding.titleBar.title = intent.getStringExtra("title")
                 }
-                view.evaluateJavascript("!!window._cf_chl_opt") {
-                    if (it == "true") {
-                        isCloudflareChallenge = true
-                    } else if (isCloudflareChallenge && viewModel.sourceVerificationEnable) {
-                        viewModel.saveVerificationResult(currentWebView) {
-                            finish()
-                        }
-                    }
+            }
+            // A response header is not visible to this WebView callback. For
+            // known Cloudflare challenges we verify success using an HTTP refetch
+            // even if the page has no title or window._cf_chl_opt marker.
+            view?.evaluateJavascript("!!window._cf_chl_opt") {
+                if (it == "true") {
+                    isCloudflareChallenge = true
+                } else if (isCloudflareChallenge && viewModel.sourceVerificationEnable &&
+                    !isCheckingCloudflareVerification
+                ) {
+                    isCheckingCloudflareVerification = true
+                    viewModel.saveVerificationResult(
+                        currentWebView,
+                        success = { finish() },
+                        onVerificationIncomplete = { isCheckingCloudflareVerification = false },
+                    )
                 }
             }
         }
