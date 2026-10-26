@@ -79,15 +79,13 @@ object EncodingDetect {
         val byteArray = ByteArray(8000)
         var pos = 0
         try {
-            file.inputStream().buffered().use {
+            file.inputStream().buffered().use { input ->
                 while (pos < byteArray.size) {
-                    val n = it.read(byteArray, pos, 1)
+                    val n = input.read(byteArray, pos, byteArray.size - pos)
                     if (n == -1) {
                         break
                     }
-                    if (byteArray[pos] < 0) {
-                        pos++
-                    }
+                    pos += n
                 }
             }
         } catch (e: Exception) {
