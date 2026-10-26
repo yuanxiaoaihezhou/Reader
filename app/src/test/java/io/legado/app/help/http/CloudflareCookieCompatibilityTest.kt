@@ -28,7 +28,7 @@ class CloudflareCookieCompatibilityTest {
 
     @Test fun `explicit cookie overrides persisted cookie even after retry`() {
         val store = CookieStore.cookieToMap(
-            "cf_clearance=${"X".repeat(4050)}; session=keep; __cf_bm=keep2"
+            "cf_clearance=${"X".repeat(4080)}; session=keep; __cf_bm=keep2"
         )
         assertTrue(CookieStore.mapToCookie(store)!!.length > 4096)
         val manager = file("src/main/java/io/legado/app/help/http/CookieManager.kt")
